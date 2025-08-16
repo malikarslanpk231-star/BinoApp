@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bino App</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .app-container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            border-radius: 0;
+            overflow: hidden;
+            background-color: #f3f4f6;
+        }
+        @media (min-width: 768px) {
+            .app-container {
+                max-width: none;
+                height: 100vh;
+                border-radius: 0;
+                box-shadow: none;
+            }
+        }
+        .file-input-label {
+            display: inline-block;
+            background-color: #4f46e5;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 9999px;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            font-weight: 600;
+        }
+        .file-input-label:hover {
+            background-color: #4338ca;
+            transform: scale(1.05);
+        }
+        #profile-photo-input {
+            display: none;
+        }
+        .message-bubble {
+            max-width: 80%;
+            padding: 0.75rem 1rem;
+            border-radius: 1.5rem;
+            margin-bottom: 0.5rem;
+            word-wrap: break-word;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            position: relative;
+        }
+        .my-message {
+            background-color: #6366f1; /* Indigo-500 */
+            color: white;
+            border-bottom-right-radius: 0.5rem;
+            margin-left: auto;
+        }
+        .other-message {
+            background-color: #e5e7eb; /* Gray-200 */
+            color: #1f2937; /* Gray-800 */
+            border-bottom-left-radius: 0.5rem;
+            margin-right: auto;
+        }
+        .delete-msg-btn {
+            display: none;
+            position: absolute;
+            top: 0;
+            right: 0;
+            transform: translate(50%, -50%);
+        }
+        .message-bubble:hover .delete-msg-btn {
+            display: block;
+        }
+        #app-description {
+            transition: opacity 0.5s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 flex items-center justify-center">
+
+    <!-- Main App Container -->
+    <div id="app" class="app-container bg-white dark:bg-gray-800">
+        <!-- Pages will be rendered here by JavaScript -->
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, addDoc, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+        import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-storage.js";
+
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyApeSaSOTqcN2pTZj2bhAiaNkD_vJ9ydXQ",
+            authDomain: "binoapp-34a6f.firebaseapp.com",
+            projectId: "binoapp-34a6f",
+            storageBucket: "binoapp-34a6f.firebasestorage.app",
+            messagingSenderId: "871772536111",
+            appId: "1:871772536111:web:6dd04b48bf0324e1a275da",
+            measurementId: "G-9P4EPFEN0H"
+        };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // Firebase Initialization
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
+
+        // App state variables
+        let currentPage = 'loading';
+        let user = null;
+        let userName = '';
+        let profilePic = 'https://placehold.co/100x100/A0C4F2/4A90E2?text=P';
+        let chatList = [];
+        let currentChatId = null;
+        let currentChatMessages = [];
+        let otherUserForChat = null;
+        let loading = false;
+        let errorMessage = '';
+
+        const appContainer = document.getElementById('app');
+        
+        // --- Core UI Renderer ---
+        const updateUI = () => {
+            appContainer.innerHTML = '';
+            switch (currentPage) {
+                case 'loading': renderLoading(); break;
+                case 'login': renderLogin(); break;
+                case 'signup': renderSignup(); break;
+                case 'profile': renderProfileSetup(); break;
+                case 'chatList': renderChatList(); break;
+                case 'chat': renderChat(); break;
+            }
+        };
+
+        // --- UI Components for each page ---
+        const renderLoading = () => {
+            appContainer.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full">
+                    <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-indigo-500"></div>
+                    <p class="mt-4 text-gray-500 dark:text-gray-400">Loading...</p>
+                </div>
+            `;
+        };
+
+        const renderLogin = () => {
+            appContainer.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full p-8 bg-gradient-to-br from-indigo-500 to-purple-600">
+                    <div class="bg-white/90 p-10 rounded-3xl shadow-2xl backdrop-blur-sm max-w-sm w-full">
+                        <h2 class="text-3xl font-bold text-center text-gray-800 mb-6">Login</h2>
+                        <p id="error-message" class="text-red-500 text-sm text-center mb-4"></p>
+                        <input type="email" id="email-input" placeholder="Email" class="w-full p-4 mb-4 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-300" />
+                        <input type="password" id="password-input" placeholder="Password" class="w-full p-4 mb-6 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-300" />
+                        <button id="login-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg transition-transform transform hover:scale-105">
+                            Login
+                        </button>
+                        <button id="go-to-signup-btn" class="mt-4 w-full text-indigo-700 hover:text-indigo-900 font-semibold transition-colors">
+                            Account nahi hai? Sign Up karein.
+                        </button>
+                    </div>
+                </div>
+            `;
+            const loginBtn = document.getElementById('login-btn');
+            const goToSignupBtn = document.getElementById('go-to-signup-btn');
+            loginBtn.addEventListener('click', handleEmailLogin);
+            goToSignupBtn.addEventListener('click', () => {
+                currentPage = 'signup';
+                updateUI();
+            });
+        };
+
+        const renderSignup = () => {
+            appContainer.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full p-8 bg-gradient-to-br from-indigo-500 to-purple-600">
+                    <div class="bg-white/90 p-10 rounded-3xl shadow-2xl backdrop-blur-sm max-w-sm w-full">
+                        <h2 class="text-3xl font-bold text-center text-gray-800 mb-6">Sign Up</h2>
+                        <p id="error-message" class="text-red-500 text-sm text-center mb-4"></p>
+                        <input type="email" id="email-input" placeholder="Email" class="w-full p-4 mb-4 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-300" />
+                        <input type="password" id="password-input" placeholder="Password" class="w-full p-4 mb-6 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all duration-300" />
+                        <button id="signup-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-lg transition-transform transform hover:scale-105">
+                            Sign Up
+                        </button>
+                        <button id="go-to-login-btn" class="mt-4 w-full text-indigo-700 hover:text-indigo-900 font-semibold transition-colors">
+                            Pehle se account hai? Login karein.
+                        </button>
+                    </div>
+                </div>
+            `;
+            const signupBtn = document.getElementById('signup-btn');
+            const goToLoginBtn = document.getElementById('go-to-login-btn');
+            signupBtn.addEventListener('click', handleSignup);
+            goToLoginBtn.addEventListener('click', () => {
+                currentPage = 'login';
+                updateUI();
+            });
+        };
+
+        const renderProfileSetup = () => {
+            appContainer.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full p-8 bg-white dark:bg-gray-800">
+                    <h2 class="text-3xl font-bold text-center mb-6">Apni Profile Banayein</h2>
+                    <div class="mb-6 relative flex flex-col items-center">
+                        <img id="profile-img" src="${profilePic}" alt="Profile" class="w-28 h-28 rounded-full border-4 border-indigo-500 object-cover mb-4 shadow-md" />
+                        <input type="file" id="profile-photo-input" accept="image/*" />
+                        <label for="profile-photo-input" class="file-input-label">
+                            Photo Upload Karein
+                        </label>
+                    </div>
+                    <input type="text" id="user-name-input" value="${userName}" placeholder="Apna naam daalein" class="w-full max-w-sm p-4 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-gray-100 dark:bg-gray-700 dark:border-gray-600 text-gray-800 dark:text-gray-200 transition-all duration-300" />
+                    <p id="error-message" class="text-red-500 text-sm mt-4"></p>
+                    <button id="save-profile-btn" class="mt-6 w-full max-w-sm bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-transform transform hover:scale-105">
+                        Save Profile
+                    </button>
+                </div>
+            `;
+            const profileImg = document.getElementById('profile-img');
+            const fileInput = document.getElementById('profile-photo-input');
+            const nameInput = document.getElementById('user-name-input');
+            const saveBtn = document.getElementById('save-profile-btn');
+            
+            fileInput.addEventListener('change', (event) => handleFileSelect(event, profileImg));
+            nameInput.addEventListener('input', (e) => userName = e.target.value);
+            saveBtn.addEventListener('click', handleSaveProfile);
+        };
+
+        const handleFileSelect = async (event, imgElement) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imgElement.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        };
+
+        const renderChatList = () => {
+            appContainer.innerHTML = `
+                <div class="flex flex-col h-full">
+                    <div class="flex items-center justify-between p-6 bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg">
+                        <h1 class="text-2xl font-bold">BINO APP</h1>
+                        <div class="flex">
+                            <button id="settings-btn" class="mr-4 p-3 rounded-full bg-white/20 hover:bg-white/30 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                                </svg>
+                            </button>
+                            <button id="add-user-btn" class="p-3 rounded-full bg-white/20 hover:bg-white/30 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="chat-list" class="flex-grow p-4 overflow-y-auto">
+                        <p class="text-center text-gray-500 mt-8">Loading chats...</p>
+                    </div>
+                    <div id="add-user-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                        <div class="bg-white dark:bg-gray-800 p-8 rounded-3xl shadow-lg w-full max-w-md transform transition-transform scale-95 duration-300">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-xl font-bold">Email se User Dhundhein</h3>
+                                <button id="close-modal-btn" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="flex mb-4">
+                                <input type="email" id="search-input" placeholder="Email se dhundhein..." class="flex-grow p-3 rounded-l-xl border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                                <button id="search-btn" class="bg-indigo-500 text-white p-3 rounded-r-xl hover:bg-indigo-600 transition-colors">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <div id="found-users-list"></div>
+                        </div>
+                    </div>
+                    <div id="settings-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                        <div class="bg-white dark:bg-gray-800 p-8 rounded-3xl shadow-lg w-full max-w-md transform transition-transform scale-95 duration-300">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-xl font-bold">Edit Profile</h3>
+                                <button id="close-settings-btn" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="mb-6 relative flex flex-col items-center">
+                                <img id="edit-profile-img" src="${profilePic}" alt="Profile" class="w-28 h-28 rounded-full border-4 border-indigo-500 object-cover mb-4 shadow-md" />
+                                <input type="file" id="edit-profile-photo-input" accept="image/*" style="display:none;" />
+                                <label for="edit-profile-photo-input" class="file-input-label">
+                                    Photo Upload Karein
+                                </label>
+                            </div>
+                            <input type="text" id="edit-user-name-input" value="${userName}" placeholder="Apna naam daalein" class="w-full p-4 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-gray-100 dark:bg-gray-700 dark:border-gray-600 text-gray-800 dark:text-gray-200 transition-all duration-300" />
+                            <button id="save-edit-profile-btn" class="mt-6 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-transform transform hover:scale-105">
+                                Save Changes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            const chatListContainer = document.getElementById('chat-list');
+            const addUserBtn = document.getElementById('add-user-btn');
+            const addUserModal = document.getElementById('add-user-modal');
+            const closeModalBtn = document.getElementById('close-modal-btn');
+            const searchInput = document.getElementById('search-input');
+            const searchBtn = document.getElementById('search-btn');
+            const settingsBtn = document.getElementById('settings-btn');
+            const settingsModal = document.getElementById('settings-modal');
+            const closeSettingsBtn = document.getElementById('close-settings-btn');
+            const editProfileImg = document.getElementById('edit-profile-img');
+            const editFileInput = document.getElementById('edit-profile-photo-input');
+            const editNameInput = document.getElementById('edit-user-name-input');
+            const saveEditBtn = document.getElementById('save-edit-profile-btn');
+
+            addUserBtn.addEventListener('click', () => {
+                addUserModal.classList.remove('hidden');
+                addUserModal.querySelector('.transform').classList.remove('scale-95');
+                addUserModal.querySelector('.transform').classList.add('scale-100');
+            });
+            closeModalBtn.addEventListener('click', () => {
+                addUserModal.querySelector('.transform').classList.remove('scale-100');
+                addUserModal.querySelector('.transform').classList.add('scale-95');
+                setTimeout(() => addUserModal.classList.add('hidden'), 300);
+            });
+            searchBtn.addEventListener('click', handleEmailSearch);
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') handleEmailSearch();
+            });
+
+            settingsBtn.addEventListener('click', () => {
+                settingsModal.classList.remove('hidden');
+                settingsModal.querySelector('.transform').classList.remove('scale-95');
+                settingsModal.querySelector('.transform').classList.add('scale-100');
+            });
+            closeSettingsBtn.addEventListener('click', () => {
+                settingsModal.querySelector('.transform').classList.remove('scale-100');
+                settingsModal.querySelector('.transform').classList.add('scale-95');
+                setTimeout(() => settingsModal.classList.add('hidden'), 300);
+            });
+            editFileInput.addEventListener('change', (e) => handleFileSelect(e, editProfileImg));
+            saveEditBtn.addEventListener('click', async () => {
+                const newName = editNameInput.value.trim();
+                let newPic = profilePic;
+                const file = editFileInput.files[0];
+                if (file) {
+                    const fileRef = storageRef(storage, `profile_pics/${user.uid}/${Date.now()}_${file.name}`);
+                    await uploadBytes(fileRef, file);
+                    newPic = await getDownloadURL(fileRef);
+                }
+                if (!newName) return;
+                try {
+                    const userDocRef = doc(db, `artifacts/${appId}/users/${user.uid}/profiles`, user.uid);
+                    await updateDoc(userDocRef, { name: newName, photo: newPic });
+
+                    const publicUserDocRef = doc(db, `artifacts/${appId}/public/data/users`, user.uid);
+                    await updateDoc(publicUserDocRef, { name: newName, photo: newPic });
+
+                    const q = query(collection(db, `artifacts/${appId}/public/data/chats`), where('members', 'array-contains', user.uid));
+                    const chats = await getDocs(q);
+                    for (let chatSnap of chats.docs) {
+                        await updateDoc(chatSnap.ref, {
+                            [`memberNames.${user.uid}`]: newName,
+                            [`memberPhotos.${user.uid}`]: newPic
+                        });
+                    }
+
+                    userName = newName;
+                    profilePic = newPic;
+                    settingsModal.classList.add('hidden');
+                    updateUI();
+                    fetchChatList(user.uid, db);
+                } catch (e) {
+                    console.error(e);
+                }
+            });
+
+            fetchChatList(user.uid, db);
+        };
+        
+        const renderChat = () => {
+            appContainer.innerHTML = `
+                <div class="flex flex-col h-full">
+                    <div class="flex items-center justify-between p-6 bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg">
+                        <button id="back-btn" class="mr-4 p-2 rounded-full hover:bg-white/20 transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 12H5M12 19l-7-7 7-7" />
+                            </svg>
+                        </button>
+                        <div class="flex items-center flex-grow">
+                            <img id="chat-header-img" src="${otherUserForChat?.photo || 'https://placehold.co/100x100/A0C4F2/4A90E2?text=P'}" alt="Profile" class="w-12 h-12 rounded-full mr-4 object-cover border-2 border-white" />
+                            <div>
+                                <h2 id="chat-header-name" class="text-xl font-semibold">${otherUserForChat?.name || 'Chat'}</h2>
+                                <p id="app-description" class="text-sm text-gray-300"></p>
+                            </div>
+                        </div>
+                        <button id="chat-menu-btn" class="p-2 rounded-full hover:bg-white/20 transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="messages-container" class="flex-grow p-4 overflow-y-auto flex flex-col space-y-4">
+                        <p class="text-center text-gray-500 mt-8">Loading messages...</p>
+                    </div>
+                    <form id="message-form" class="p-4 bg-white dark:bg-gray-800 shadow-md flex items-center">
+                        <button type="button" id="attach-btn" class="p-3 rounded-full bg-indigo-500 hover:bg-indigo-600 text-white transition-transform transform hover:scale-110">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                            </svg>
+                        </button>
+                        <button type="button" id="voice-btn" class="mx-2 p-3 rounded-full bg-indigo-500 hover:bg-indigo-600 text-white transition-transform transform hover:scale-110">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                            </svg>
+                        </button>
+                        <input type="text" id="message-input" placeholder="Message likhein..." class="flex-grow p-4 rounded-full bg-gray-100 dark:bg-gray-700 border-none focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-800 dark:text-gray-200 transition-all duration-300" />
+                        <button type="submit" id="send-btn" class="ml-4 p-3 rounded-full bg-indigo-500 hover:bg-indigo-600 text-white transition-transform transform hover:scale-110">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2L15 22 11 13 2 9z"/></svg>
+                        </button>
+                    </form>
+                    <input type="file" id="file-input" style="display:none;">
+                    <div id="chat-menu-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                        <div class="bg-white dark:bg-gray-800 p-8 rounded-3xl shadow-lg w-full max-w-md transform transition-transform scale-95 duration-300">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-xl font-bold">Chat Options</h3>
+                                <button id="close-chat-menu-btn" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <button id="delete-all-btn" class="w-full text-left p-4 hover:bg-gray-100 dark:hover:bg-gray-700">Delete All Messages</button>
+                        </div>
+                    </div>
+                    <div id="coming-soon-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                        <div class="bg-white dark:bg-gray-800 p-8 rounded-3xl shadow-lg w-full max-w-md transform transition-transform scale-95 duration-300">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-2xl font-bold text-red-500">Coming Soon</h3>
+                                <button id="close-coming-soon-btn" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <p class="text-sm text-gray-500 dark:text-gray-400">This feature is under development and will be available soon. Stay tuned for exciting updates!</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            const backBtn = document.getElementById('back-btn');
+            const messageForm = document.getElementById('message-form');
+            const attachBtn = document.getElementById('attach-btn');
+            const fileInput = document.getElementById('file-input');
+            const voiceBtn = document.getElementById('voice-btn');
+            const chatMenuBtn = document.getElementById('chat-menu-btn');
+            const chatMenuModal = document.getElementById('chat-menu-modal');
+            const closeChatMenuBtn = document.getElementById('close-chat-menu-btn');
+            const deleteAllBtn = document.getElementById('delete-all-btn');
+            const comingSoonModal = document.getElementById('coming-soon-modal');
+            const closeComingSoonBtn = document.getElementById('close-coming-soon-btn');
+            
+            backBtn.addEventListener('click', () => {
+                currentPage = 'chatList';
+                updateUI();
+                fetchChatList(user.uid, db);
+            });
+            messageForm.addEventListener('submit', handleSendMessage);
+            attachBtn.addEventListener('click', () => {
+                comingSoonModal.classList.remove('hidden');
+                comingSoonModal.querySelector('.transform').classList.remove('scale-95');
+                comingSoonModal.querySelector('.transform').classList.add('scale-100');
+            });
+            voiceBtn.addEventListener('click', () => {
+                comingSoonModal.classList.remove('hidden');
+                comingSoonModal.querySelector('.transform').classList.remove('scale-95');
+                comingSoonModal.querySelector('.transform').classList.add('scale-100');
+            });
+            closeComingSoonBtn.addEventListener('click', () => {
+                comingSoonModal.querySelector('.transform').classList.remove('scale-100');
+                comingSoonModal.querySelector('.transform').classList.add('scale-95');
+                setTimeout(() => comingSoonModal.classList.add('hidden'), 300);
+            });
+            chatMenuBtn.addEventListener('click', () => {
+                chatMenuModal.classList.remove('hidden');
+                chatMenuModal.querySelector('.transform').classList.remove('scale-95');
+                chatMenuModal.querySelector('.transform').classList.add('scale-100');
+            });
+            closeChatMenuBtn.addEventListener('click', () => {
+                chatMenuModal.querySelector('.transform').classList.remove('scale-100');
+                chatMenuModal.querySelector('.transform').classList.add('scale-95');
+                setTimeout(() => chatMenuModal.classList.add('hidden'), 300);
+            });
+            deleteAllBtn.addEventListener('click', async () => {
+                if (confirm('All messages delete karein?')) {
+                    const messagesQuery = query(collection(db, `artifacts/${appId}/public/data/chats/${currentChatId}/messages`));
+                    const msgs = await getDocs(messagesQuery);
+                    for (let msg of msgs.docs) {
+                        await deleteDoc(msg.ref);
+                    }
+                    const chatDocRef = doc(db, `artifacts/${appId}/public/data/chats`, currentChatId);
+                    await updateDoc(chatDocRef, {
+                        lastMessage: '',
+                        lastMessageAt: null
+                    });
+                }
+                chatMenuModal.classList.add('hidden');
+            });
+
+            // Animate app descriptions
+            const descriptions = [
+                "Connect with friends instantly!",
+                "Enjoy secure messaging.",
+                "Promote Pakistani App First.",
+                "Your Friends, Your Chat.",
+                "Fast Messages, Happy Moments.",
+                "Stay Connected, Stay Happy.",
+                "Talk More, Worry Less.",
+                "Simple Chat, Big Smiles.",
+                "Stay connected always."
+            ];
+            let currentIndex = 0;
+            const descriptionElement = document.getElementById('app-description');
+            descriptionElement.innerText = descriptions[currentIndex];
+            currentIndex = (currentIndex + 1) % descriptions.length;
+
+            const changeDescription = () => {
+                descriptionElement.style.opacity = 0;
+                setTimeout(() => {
+                    descriptionElement.innerText = descriptions[currentIndex];
+                    descriptionElement.style.opacity = 1;
+                    currentIndex = (currentIndex + 1) % descriptions.length;
+                }, 500);
+            };
+            setInterval(changeDescription, 4000);
+            
+            // Initial call to fetch messages
+            fetchChatMessages(currentChatId, db);
+        };
+
+        // --- Core Application Logic ---
+
+        // Handle user signup with email and password
+        const handleSignup = async () => {
+            const email = document.getElementById('email-input').value;
+            const password = document.getElementById('password-input').value;
+            const errorElement = document.getElementById('error-message');
+            errorElement.innerText = ''; // Clear previous errors
+
+            if (!email || !password) {
+                errorElement.innerText = 'Please enter both email and password.';
+                return;
+            }
+
+            const signupBtn = document.getElementById('signup-btn');
+            signupBtn.innerText = 'Signing up...';
+            signupBtn.disabled = true;
+
+            try {
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                user = userCredential.user;
+                await checkUserProfile(user.uid);
+            } catch (error) {
+                console.error("Firebase Signup Error:", error.code, error.message);
+                let message = 'An unknown error occurred. Please try again.';
+                if (error.code === 'auth/email-already-in-use') {
+                    message = 'This email is already in use. Please try logging in.';
+                } else if (error.code === 'auth/weak-password') {
+                    message = 'Password should be at least 6 characters.';
+                } else if (error.code === 'auth/invalid-email') {
+                    message = 'The email address is not valid.';
+                } else {
+                    message = `Error: ${error.message}`;
+                }
+                errorElement.innerText = message;
+            } finally {
+                signupBtn.innerText = 'Sign Up';
+                signupBtn.disabled = false;
+            }
+        };
+
+        // Handle login with email and password
+        const handleEmailLogin = async () => {
+            const email = document.getElementById('email-input').value;
+            const password = document.getElementById('password-input').value;
+            const errorElement = document.getElementById('error-message');
+            errorElement.innerText = ''; // Clear previous errors
+
+            if (!email || !password) {
+                errorElement.innerText = 'Please enter both email and password.';
+                return;
+            }
+
+            const loginBtn = document.getElementById('login-btn');
+            loginBtn.innerText = 'Logging in...';
+            loginBtn.disabled = true;
+
+            try {
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                user = userCredential.user;
+                await checkUserProfile(user.uid);
+            } catch (error) {
+                console.error("Firebase Login Error:", error.code, error.message);
+                let message = 'An unknown error occurred. Please try again.';
+                if (error.code === 'auth/invalid-credential') {
+                    message = 'Invalid email or password.';
+                } else {
+                    message = `Error: ${error.message}`;
+                }
+                errorElement.innerText = message;
+            } finally {
+                loginBtn.innerText = 'Login';
+                loginBtn.disabled = false;
+            }
+        };
+
+        // Handle saving user profile
+        const handleSaveProfile = async () => {
+            const saveBtn = document.getElementById('save-profile-btn');
+            const errorElement = document.getElementById('error-message');
+
+            if (!userName.trim()) {
+                errorElement.innerText = 'Please enter a name.';
+                return;
+            }
+            if (!user || !user.uid) {
+                errorElement.innerText = 'Authentication error. Please try logging in again.';
+                return;
+            }
+
+            saveBtn.innerText = 'Saving...';
+            saveBtn.disabled = true;
+
+            let newPic = profilePic;
+            const file = document.getElementById('profile-photo-input').files[0];
+            if (file) {
+                const fileRef = storageRef(storage, `profile_pics/${user.uid}/${Date.now()}_${file.name}`);
+                await uploadBytes(fileRef, file);
+                newPic = await getDownloadURL(fileRef);
+            }
+
+            try {
+                const userDocRef = doc(db, `artifacts/${appId}/users/${user.uid}/profiles`, user.uid);
+                await setDoc(userDocRef, {
+                    name: userName.trim(),
+                    photo: newPic,
+                    userId: user.uid,
+                    createdAt: serverTimestamp()
+                });
+
+                const publicUserDocRef = doc(db, `artifacts/${appId}/public/data/users`, user.uid);
+                await setDoc(publicUserDocRef, {
+                    name: userName.trim(),
+                    photo: newPic,
+                    userId: user.uid,
+                    email: user.email,
+                    createdAt: serverTimestamp()
+                });
+                
+                profilePic = newPic;
+                currentPage = 'chatList';
+                updateUI();
+                fetchChatList(user.uid, db);
+            } catch (e) {
+                console.error("Profile save error:", e);
+                errorElement.innerText = `Failed to save profile. Error: ${e.message}`;
+            } finally {
+                saveBtn.innerText = 'Save Profile';
+                saveBtn.disabled = false;
+            }
+        };
+        
+        // Fetch and display the list of chats
+        const fetchChatList = (userId, dbInstance) => {
+            const chatListContainer = document.getElementById('chat-list');
+            const q = query(collection(dbInstance, `artifacts/${appId}/public/data/chats`), where('members', 'array-contains', userId));
+            onSnapshot(q, (querySnapshot) => {
+                chatList = [];
+                querySnapshot.forEach((doc) => {
+                    const chatData = doc.data();
+                    chatList.push({ id: doc.id, ...chatData });
+                });
+                renderChatListItems(chatListContainer);
+            });
+        };
+
+        const renderChatListItems = (container) => {
+            container.innerHTML = '';
+            if (chatList.length === 0) {
+                container.innerHTML = `<p class="text-center text-gray-500 mt-8">Koi chats nahi hain. Naye users ko dhoondhe.</p>`;
+                return;
+            }
+            chatList.forEach(chat => {
+                const otherUserId = chat.members.find(id => id !== user.uid);
+                const otherUserName = chat.memberNames?.[otherUserId] || 'Unknown User';
+                const otherUserPhoto = chat.memberPhotos?.[otherUserId] || 'https://placehold.co/100x100/A0C4F2/4A90E2?text=P';
+                
+                const chatItem = document.createElement('div');
+                chatItem.classList.add('flex', 'items-center', 'justify-between', 'p-4', 'rounded-xl', 'mb-2', 'transition-colors', 'hover:bg-gray-100', 'cursor-pointer', 'shadow-sm');
+                chatItem.innerHTML = `
+                    <div class="flex items-center flex-grow" data-chat-id="${chat.id}">
+                        <img src="${otherUserPhoto}" alt="${otherUserName}" class="w-12 h-12 rounded-full mr-4 object-cover border-2 border-indigo-300" />
+                        <div>
+                            <h3 class="font-semibold text-lg">${otherUserName}</h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 truncate">${chat.lastMessage || 'No messages yet'}</p>
+                        </div>
+                    </div>
+                    <button class="delete-chat-btn" data-chat-id="${chat.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                    </button>
+                `;
+                const contentDiv = chatItem.querySelector('[data-chat-id]');
+                contentDiv.addEventListener('click', () => {
+                    currentChatId = chat.id;
+                    otherUserForChat = { id: otherUserId, name: otherUserName, photo: otherUserPhoto };
+                    currentPage = 'chat';
+                    updateUI();
+                });
+                const deleteBtn = chatItem.querySelector('.delete-chat-btn');
+                deleteBtn.addEventListener('click', async (e) => {
+                    const chatId = e.target.closest('button').dataset.chatId;
+                    if (confirm('Is chat ko delete karein?')) {
+                        const messagesQuery = query(collection(db, `artifacts/${appId}/public/data/chats/${chatId}/messages`));
+                        const msgs = await getDocs(messagesQuery);
+                        for (let msg of msgs.docs) {
+                            await deleteDoc(msg.ref);
+                        }
+                        await deleteDoc(doc(db, `artifacts/${appId}/public/data/chats`, chatId));
+                    }
+                });
+                container.appendChild(chatItem);
+            });
+        };
+
+        // Handle user search by email
+        const handleEmailSearch = async () => {
+            const searchInput = document.getElementById('search-input');
+            const foundUsersList = document.getElementById('found-users-list');
+            const searchQuery = searchInput.value.trim();
+            if (!searchQuery) {
+                foundUsersList.innerHTML = '';
+                return;
+            }
+
+            foundUsersList.innerHTML = `<p class="text-center text-gray-500">Dhoondh rahe hain...</p>`;
+
+            try {
+                const q = query(
+                    collection(db, `artifacts/${appId}/public/data/users`),
+                    where('email', '==', searchQuery)
+                );
+                const querySnapshot = await getDocs(q);
+                const foundUsers = [];
+                querySnapshot.forEach((doc) => {
+                    if (doc.id !== user.uid) {
+                        foundUsers.push(doc.data());
+                    }
+                });
+
+                if (foundUsers.length > 0) {
+                    foundUsersList.innerHTML = `<ul class="space-y-2 mt-4"></ul>`;
+                    const ul = foundUsersList.querySelector('ul');
+                    foundUsers.forEach((foundUser) => {
+                        const li = document.createElement('li');
+                        li.classList.add('flex', 'items-center', 'p-3', 'rounded-xl', 'hover:bg-gray-100', 'cursor-pointer');
+                        li.innerHTML = `
+                            <img src="${foundUser.photo}" alt="${foundUser.name}" class="w-10 h-10 rounded-full mr-3 object-cover" />
+                            <div class="flex-grow">
+                                <span class="font-semibold">${foundUser.name}</span>
+                                <p class="text-sm text-gray-500">${foundUser.email}</p>
+                            </div>
+                        `;
+                        li.addEventListener('click', () => {
+                            document.getElementById('add-user-modal').classList.add('hidden');
+                            handleStartChat(foundUser);
+                        });
+                        ul.appendChild(li);
+                    });
+                } else {
+                    foundUsersList.innerHTML = `<p class="text-center text-gray-500">Is email par koi user nahi mila.</p>`;
+                }
+            } catch (e) {
+                foundUsersList.innerHTML = `<p class="text-red-500 text-center">Failed to search for users.</p>`;
+            }
+        };
+
+        // Start a new chat
+        const handleStartChat = async (otherUser) => {
+            const sortedMembers = [user.uid, otherUser.userId].sort();
+            const chatId = sortedMembers.join('_');
+            
+            const chatDocRef = doc(db, `artifacts/${appId}/public/data/chats`, chatId);
+            const chatDoc = await getDoc(chatDocRef);
+            
+            if (!chatDoc.exists()) {
+                await setDoc(chatDocRef, {
+                    members: sortedMembers,
+                    lastMessage: '',
+                    createdAt: serverTimestamp(),
+                    memberNames: {
+                        [user.uid]: userName,
+                        [otherUser.userId]: otherUser.name,
+                    },
+                    memberPhotos: {
+                        [user.uid]: profilePic,
+                        [otherUser.userId]: otherUser.photo
+                    }
+                });
+            }
+
+            currentChatId = chatId;
+            otherUserForChat = otherUser;
+            currentPage = 'chat';
+            updateUI();
+        };
+
+        // Fetch and display chat messages
+        const fetchChatMessages = (chatId, dbInstance) => {
+            if (!chatId) return;
+
+            const messagesContainer = document.getElementById('messages-container');
+            const q = query(collection(dbInstance, `artifacts/${appId}/public/data/chats/${chatId}/messages`));
+            
+            onSnapshot(q, (querySnapshot) => {
+                currentChatMessages = [];
+                querySnapshot.forEach((doc) => {
+                    currentChatMessages.push({ id: doc.id, ...doc.data() });
+                });
+
+                currentChatMessages.sort((a, b) => {
+                    if (a.timestamp && b.timestamp) {
+                        const timestampA = a.timestamp.toDate ? a.timestamp.toDate() : new Date(a.timestamp);
+                        const timestampB = b.timestamp.toDate ? b.timestamp.toDate() : new Date(b.timestamp);
+                        return timestampA - timestampB;
+                    }
+                    return 0;
+                });
+                renderMessages(messagesContainer);
+            });
+        };
+
+        const renderMessages = (container) => {
+            container.innerHTML = '';
+            if (currentChatMessages.length === 0) {
+                container.innerHTML = `<p class="text-center text-gray-500 mt-8">Koi messages nahi hain. Hi bol kar shuru karein!</p>`;
+                return;
+            }
+            currentChatMessages.forEach(msg => {
+                const isCurrentUser = msg.senderId === user.uid;
+                const messageDiv = document.createElement('div');
+                messageDiv.classList.add('flex', 'w-full', isCurrentUser ? 'justify-end' : 'justify-start');
+                
+                const bubble = document.createElement('div');
+                bubble.classList.add('message-bubble', isCurrentUser ? 'my-message' : 'other-message');
+                bubble.dataset.msgId = msg.id;
+                
+                if (msg.type === 'image') {
+                    bubble.innerHTML += `<img src="${msg.url}" class="max-w-full rounded-lg" alt="Image">`;
+                } else if (msg.type === 'audio') {
+                    bubble.innerHTML += `<audio controls src="${msg.url}"></audio>`;
+                } else if (msg.type === 'file') {
+                    bubble.innerHTML += `<a href="${msg.url}" download class="text-blue-500 underline">${msg.text || 'File'}</a>`;
+                } else {
+                    bubble.innerHTML += `<p class="break-words">${msg.text}</p>`;
+                }
+
+                if (msg.timestamp) {
+                    const time = document.createElement('div');
+                    time.classList.add('text-xs', 'mt-1', 'text-gray-400', isCurrentUser ? 'text-right' : 'text-left');
+                    const timestamp = msg.timestamp.toDate ? msg.timestamp.toDate() : new Date(msg.timestamp);
+                    time.innerText = timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    bubble.appendChild(time);
+                }
+
+                if (isCurrentUser) {
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.classList.add('delete-msg-btn', 'text-red-500');
+                    deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>`;
+                    bubble.appendChild(deleteBtn);
+                }
+                
+                messageDiv.appendChild(bubble);
+                container.appendChild(messageDiv);
+
+                // Add interaction for delete
+                let longPressTimer;
+                bubble.addEventListener('dblclick', () => {
+                    if (isCurrentUser) {
+                        deleteBtn.style.display = 'block';
+                    }
+                });
+                bubble.addEventListener('touchstart', () => {
+                    longPressTimer = setTimeout(() => {
+                        if (isCurrentUser) {
+                            deleteBtn.style.display = 'block';
+                        }
+                    }, 500);
+                });
+                bubble.addEventListener('touchend', () => {
+                    clearTimeout(longPressTimer);
+                });
+            });
+            container.scrollTop = container.scrollHeight;
+
+            // Add delete listeners
+            document.querySelectorAll('.delete-msg-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const msgId = e.target.closest('.message-bubble').dataset.msgId;
+                    if (confirm('Is message ko delete karein?')) {
+                        await deleteDoc(doc(db, `artifacts/${appId}/public/data/chats/${currentChatId}/messages`, msgId));
+                    }
+                });
+            });
+        };
+
+        const handleSendMessage = async (e) => {
+            e.preventDefault();
+            const messageInput = document.getElementById('message-input');
+            const messageText = messageInput.value.trim();
+
+            if (messageText === '' || !currentChatId) {
+                return;
+            }
+
+            try {
+                const messagesRef = collection(db, `artifacts/${appId}/public/data/chats/${currentChatId}/messages`);
+                await addDoc(messagesRef, {
+                    senderId: user.uid,
+                    text: messageText,
+                    timestamp: serverTimestamp()
+                });
+
+                const chatDocRef = doc(db, `artifacts/${appId}/public/data/chats`, currentChatId);
+                await updateDoc(chatDocRef, {
+                    lastMessage: messageText,
+                    lastMessageAt: serverTimestamp()
+                });
+
+                messageInput.value = '';
+            } catch (error) {
+                console.error("Error sending message:", error);
+            }
+        };
+
+        const handleSendFile = async (e) => {
+            const file = e.target.files[0];
+            if (!file || !currentChatId) return;
+
+            try {
+                const fileRef = storageRef(storage, `chat_files/${currentChatId}/${Date.now()}_${file.name}`);
+                await uploadBytes(fileRef, file);
+                const url = await getDownloadURL(fileRef);
+
+                const type = file.type.startsWith('image/') ? 'image' : 'file';
+                const messagesRef = collection(db, `artifacts/${appId}/public/data/chats/${currentChatId}/messages`);
+                await addDoc(messagesRef, {
+                    senderId: user.uid,
+                    text: file.name,
+                    url,
+                    type,
+                    timestamp: serverTimestamp()
+                });
+
+                const chatDocRef = doc(db, `artifacts/${appId}/public/data/chats`, currentChatId);
+                await updateDoc(chatDocRef, {
+                    lastMessage: `File: ${file.name}`,
+                    lastMessageAt: serverTimestamp()
+                });
+            } catch (error) {
+                console.error("Error sending file:", error);
+            }
+        };
+
+        let recorder;
+        let audioChunks = [];
+
+        const startRecording = () => {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    recorder = new MediaRecorder(stream);
+                    recorder.start();
+                    audioChunks = [];
+                    recorder.ondataavailable = (e) => audioChunks.push(e.data);
+                })
+                .catch(error => console.error("Error starting recording:", error));
+        };
+
+        const stopRecording = async () => {
+            if (!recorder) return;
+            recorder.stop();
+            recorder.onstop = async () => {
+                const blob = new Blob(audioChunks, { type: 'audio/webm' });
+                try {
+                    const fileRef = storageRef(storage, `chat_audio/${currentChatId}/${Date.now()}.webm`);
+                    await uploadBytes(fileRef, blob);
+                    const url = await getDownloadURL(fileRef);
+
+                    const messagesRef = collection(db, `artifacts/${appId}/public/data/chats/${currentChatId}/messages`);
+                    await addDoc(messagesRef, {
+                        senderId: user.uid,
+                        text: '',
+                        url,
+                        type: 'audio',
+                        timestamp: serverTimestamp()
+                    });
+
+                    const chatDocRef = doc(db, `artifacts/${appId}/public/data/chats`, currentChatId);
+                    await updateDoc(chatDocRef, {
+                        lastMessage: 'Voice message',
+                        lastMessageAt: serverTimestamp()
+                    });
+                } catch (error) {
+                    console.error("Error sending voice message:", error);
+                }
+            };
+        };
+
+        // Check if user profile exists
+        const checkUserProfile = async (userId) => {
+            const userDocRef = doc(db, `artifacts/${appId}/users/${userId}/profiles`, userId);
+            try {
+                const userDocSnap = await getDoc(userDocRef);
+                if (userDocSnap.exists()) {
+                    const profileData = userDocSnap.data();
+                    userName = profileData.name;
+                    profilePic = profileData.photo;
+                    currentPage = 'chatList';
+                    updateUI();
+                    fetchChatList(userId, db);
+                } else {
+                    currentPage = 'profile';
+                    updateUI();
+                }
+            } catch (e) {
+                console.error('Error checking user profile:', e);
+                currentPage = 'profile';
+                updateUI();
+            }
+        };
+
+        // Initial setup and state listener
+        window.addEventListener('DOMContentLoaded', () => {
+            onAuthStateChanged(auth, async (authUser) => {
+                if (authUser) {
+                    user = authUser;
+                    await checkUserProfile(user.uid);
+                } else {
+                    currentPage = 'login';
+                    updateUI();
+                }
+            });
+        });
+
+    </script>
+</body>
+</html>
